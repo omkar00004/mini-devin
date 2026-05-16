@@ -291,6 +291,37 @@ def print_error(msg: str):
     console.print(f"\n  [bold red]✗[/bold red] [red]{escape(msg)}[/red]\n")
 
 
+def build_system_prompt(mcp_tools: list) -> str:
+    """
+    Build system prompt dynamically.
+    Tool descriptions come from MCP — never hardcoded here.
+    Prompt only contains behavioral rules the tools can't express.
+    """
+    tool_lines = []
+    for tool in mcp_tools:
+        # Use the description from the MCP server schema directly
+        tool_lines.append(f"- {tool['name']}: {tool['description']}")
+
+    tools_section = "\n".join(tool_lines)
+
+    return f"""You are CoderAgent — a precise software engineer working inside a sandbox.
+
+Tools available:
+{tools_section}
+
+Rules:
+1. Always read a file before editing it — never assume its current contents.
+2. After writing a fix, always run the code to verify it works.
+3. To run code, use execute_command with the appropriate command for the language:
+   - Python:     python filename.py
+   - Node.js:    node filename.js
+   - Go:         go run filename.go
+   - Shell:      bash filename.sh
+   - Other:      use whatever command the project's language requires
+4. Fix ALL bugs you find, not just the first one.
+5. After write_file, read_file again to confirm the content is exactly what you intended.
+6. When done, summarize every change you made and why."""
+
 # ── The ReAct Loop ─────────────────────────────────────────────────────────
 
 def run_coder_agent(task: str):
@@ -304,29 +335,15 @@ def run_coder_agent(task: str):
     print_init(task, tool_names)
 
     messages = [
-    {
-        "role": "system",
-        "content": (
-            "You are CoderAgent — a precise software engineer.\n\n"
-            "Tools available:\n"
-            "- read_file: read an existing file from the sandbox\n"
-            "- write_file: write or overwrite a file in the sandbox\n"
-            "- list_dir: list files in a sandbox directory\n"
-            "- execute_command: run a shell command (use this to run python files: "
-            "execute_command with 'python filename.py')\n"
-            "- run_python: execute a short Python code snippet directly "
-            "(use this for quick calculations, NOT for running files)\n\n"
-            "Rules:\n"
-            "1. Always READ the file before editing it.\n"
-            "2. To run a file after fixing it, use execute_command('python filename.py').\n"
-            "3. Never use os.system() or subprocess inside run_python.\n"
-            "4. Fix ALL bugs you find, not just the first one.\n"
-            "5. When done, summarize exactly what you changed and why."
-            "6. After write_file, always read_file again to confirm the content is what you intended."
-        )
-    },
-    {"role": "user", "content": task}
-]
+        {
+            "role": "system",
+            "content": build_system_prompt(mcp_tools)  # ← dynamic now
+        },
+        {
+            "role": "user",
+            "content": task
+        }
+    ]
 
     for step in range(1, MAX_STEPS + 1):
 
