@@ -42,6 +42,8 @@ TOOLS = [
         "name": "execute_command",
         "description": (
             "Run a shell command inside the sandbox directory. "
+            "Use this to run files in any language: "
+            "'python file.py', 'node file.js', 'go run file.go', etc. "
             "Each call is stateless — no state persists between calls. "
             "For multi-step operations, chain commands with && in a single call."
         ),
@@ -66,6 +68,7 @@ TOOLS = [
             "Execute a Python code string inside the sandbox. "
             "Code runs with the sandbox as the working directory. "
             "Print statements go to stdout. Exceptions go to stderr."
+            "For running files in any language, use execute_command instead."
         ),
         "inputSchema": {
             "type": "object",
@@ -202,6 +205,9 @@ def tool_run_python(arguments: dict) -> dict:
             temp_path = f.name
 
         result = tool_execute_command({
+            # sys.executable = the exact Python binary running this server
+            # guarantees we use the same Python environment, not whatever
+            # 'python' resolves to on the system PATH
             "command": f"{sys.executable} {temp_path}",
             "timeout_ms": timeout_ms
         })
