@@ -1,0 +1,4 @@
+sandbox/           # don't commit test files written during runs
+__pycache__/
+*.pyc
+.env               # never commit tokens
