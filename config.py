@@ -20,3 +20,7 @@ POLL_TIMEOUT_SEC    = 300   # Maximum time in seconds to wait before a task poll
 TEMPERATURE_AGENT   = 0.2   # Temperature for CoderAgent (low for logical precision)
 TEMPERATURE_PLANNER = 0.1   # Temperature for PlannerAgent (extremely low for deterministic planning)
 TEMPERATURE_SUMMARY = 0.1   # Temperature for summarizer (extremely low for pure factual accuracy)
+
+# ── Debugger Agent Settings ──────────────────────────────────────────────────
+DEBUGGER_AGENT_PORT = 9002
+MAX_DEBUG_ATTEMPTS  = 3

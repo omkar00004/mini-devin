@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from rich.console import Console
 from rich.markup import escape
+import urllib.request as _urllib
 
 # Add parent dir to path so memory/ and models/ imports work
 sys.path.insert(0, os.path.dirname(__file__))
@@ -37,6 +38,7 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../.env"))
 GROQ_API_KEY       = os.environ["GROQ_API_KEY"]
 FILESYSTEM_MCP_URL = os.environ.get("FILESYSTEM_MCP_URL", "http://localhost:8000")
 SHELL_MCP_URL      = os.environ.get("SHELL_MCP_URL",      "http://localhost:8001")
+DEBUGGER_AGENT_URL = os.environ.get("DEBUGGER_AGENT_URL", "http://localhost:9002")
 CODER_PORT         = int(os.environ.get("CODER_AGENT_PORT", 9001))
 
 client  = Groq(api_key=GROQ_API_KEY)
@@ -511,31 +513,124 @@ def run_react_loop(task_card: TaskCard) -> tuple[str, list]:
 
     return final_answer, artifacts
 
+# ── Escalate to Debugger ─────────────────────────────────────────────────
+
+def escalate_to_debugger(
+    task_card:    TaskCard,
+    test_failure: str,
+    previous_fix: str
+) -> dict:
+    """
+    Send failed task to DebuggerAgent via A2A.
+    Poll until debugger returns completed or escalate.
+    """
+    from config import POLL_INTERVAL_SEC, POLL_TIMEOUT_SEC
+
+    payload = json.dumps({
+        "task_card":    task_card.to_dict(),
+        "test_failure": test_failure,
+        "previous_fix": previous_fix,
+    }).encode("utf-8")
+
+    req = _urllib.Request(
+        f"{DEBUGGER_AGENT_URL}/tasks/send",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+
+    try:
+        with _urllib.urlopen(req, timeout=10) as resp:
+            if resp.status != 202:
+                return {"status": "failed", "error": "DebuggerAgent rejected task"}
+    except Exception as e:
+        return {"status": "failed", "error": f"DebuggerAgent unreachable: {e}"}
+
+    # Poll for result
+    deadline = time.time() + POLL_TIMEOUT_SEC
+    while time.time() < deadline:
+        try:
+            with _urllib.urlopen(
+                _urllib.Request(
+                    f"{DEBUGGER_AGENT_URL}/tasks/{task_card.task_id}"
+                ), timeout=10
+            ) as resp:
+                data   = json.loads(resp.read())
+                status = data.get("status")
+            if status in ("completed", "escalate", "failed"):
+                return data
+            time.sleep(POLL_INTERVAL_SEC)
+        except Exception:
+            time.sleep(POLL_INTERVAL_SEC)
+
+    return {"status": "timeout", "task_id": task_card.task_id}  
 
 # ── Background task runner ─────────────────────────────────────────────────
 
 def run_task_background(task_card: TaskCard):
-    """
-    Runs in a background thread.
-    Updates task_store when done so PlannerAgent can poll it.
-    """
+    from test_agent import run_tests
+
     try:
         final_answer, artifacts = run_react_loop(task_card)
 
-        task_store[task_card.task_id].update({
-            "status":    "completed",
-            "artifacts": [a.__dict__ for a in artifacts],
-            "result":    final_answer,
-        })
+        # Run tests on every modified file
+        files_modified = [a.file for a in artifacts if a.file]
+        test_passed    = True
+        test_failure   = ""
+
+        for file_path in files_modified:
+            result = run_tests(task_card.task_id, file_path, task_card.description)
+            if not result.passed():
+                test_passed   = False
+                test_failure  = result.failure_details
+                break
+
+        if test_passed:
+            # Clean pass — done
+            task_store[task_card.task_id].update({
+                "status":    "completed",
+                "artifacts": [a.__dict__ for a in artifacts],
+                "result":    final_answer,
+            })
+
+        else:
+            # Tests failed — escalate to DebuggerAgent
+            log(f"[yellow]Tests failed for {task_card.task_id} "
+                f"— escalating to DebuggerAgent[/yellow]")
+
+            debug_result = escalate_to_debugger(
+                task_card    = task_card,
+                test_failure = test_failure,
+                previous_fix = final_answer,
+            )
+
+            debug_status = debug_result.get("status")
+
+            if debug_status == "completed":
+                task_store[task_card.task_id].update({
+                    "status":    "completed",
+                    "artifacts": debug_result.get("artifacts", []),
+                    "result":    debug_result.get("result", ""),
+                    "debugged":  True,
+                })
+            elif debug_status == "escalate":
+                # DebuggerAgent also failed — needs PlannerAgent replanning
+                task_store[task_card.task_id].update({
+                    "status":         "escalate",
+                    "failure_report": debug_result.get("failure_report", {}),
+                })
+            else:
+                task_store[task_card.task_id].update({
+                    "status": "failed",
+                    "error":  debug_result.get("error", "unknown"),
+                })
 
     except Exception as e:
-        log(f"[red]Task {task_card.task_id} failed: {e}[/red]")
+        log(f"[red]Task {task_card.task_id} crashed: {e}[/red]")
         task_store[task_card.task_id].update({
-            "status": "failed",
-            "error":  str(e),
+            "status": "failed", "error": str(e)
         })
-
-
+        
 # ── A2A Endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/.well-known/agent.json")

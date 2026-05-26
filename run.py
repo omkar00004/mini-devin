@@ -1,62 +1,65 @@
-# run.py — starts all servers and runs the full system
+# run.py
 
-import subprocess
-import time
-import sys
-import os
+import subprocess, time, sys, os
 
-def start_server(name: str, cmd: list, cwd: str) -> subprocess.Popen:
-    """Start a server process and return the handle."""
+def start(name, cmd, cwd):
     proc = subprocess.Popen(
-        cmd,
-        cwd    = cwd,
-        stdout = subprocess.DEVNULL,
-        stderr = subprocess.DEVNULL,
+        cmd, cwd=cwd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
-    print(f"  ✓ {name} started (pid {proc.pid})")
+    print(f"  ✓ {name} (pid {proc.pid})")
     return proc
 
 if __name__ == "__main__":
-    base = os.path.dirname(os.path.abspath(__file__))
+    base  = os.path.dirname(os.path.abspath(__file__))
+    procs = []
 
     print("\nStarting mini-devin...\n")
 
-    procs = []
     try:
-        # 1 — filesystem-mcp
-        procs.append(start_server(
-            "filesystem-mcp (port 8000)",
+        procs.append(start(
+            "filesystem-mcp  port 8000",
             ["uvicorn", "server:app", "--port", "8000", "--log-level", "error"],
             cwd=os.path.join(base, "mcp_servers/filesystem")
         ))
-
-        # 2 — shell-mcp
-        procs.append(start_server(
-            "shell-mcp     (port 8001)",
+        procs.append(start(
+            "shell-mcp       port 8001",
             ["uvicorn", "server:app", "--port", "8001", "--log-level", "error"],
             cwd=os.path.join(base, "mcp_servers/shell")
         ))
-
-        # 3 — CoderAgent A2A server
-        procs.append(start_server(
-            "CoderAgent    (port 9001)",
+        procs.append(start(
+            "CoderAgent      port 9001",
             [sys.executable, "coder_agent.py"],
             cwd=os.path.join(base, "agents")
         ))
+        procs.append(start(
+            "DebuggerAgent   port 9002",
+            [sys.executable, "debugger_agent.py"],
+            cwd=os.path.join(base, "agents")
+        ))
 
-        # Give servers time to bind their ports
-        print("\nWaiting for servers to start...")
+        print("\nWaiting for servers...")
         time.sleep(3)
 
-        # 4 — PlannerAgent runs and exits
+        # Index sandbox before running planner
+        print("\nIndexing codebase...")
+        subprocess.run(
+            [sys.executable, "-c",
+             "import sys; sys.path.insert(0,'agents'); "
+             "from memory.semantic import index_directory; "
+             "r = index_directory('sandbox'); print(f'  ✓ {r}')"
+            ],
+            cwd=base
+        )
+
         print("\n" + "─" * 60 + "\n")
-        planner = subprocess.run(
+        subprocess.run(
             [sys.executable, "planner_agent.py"],
             cwd=os.path.join(base, "agents")
         )
 
     finally:
-        print("\nShutting down servers...")
-        for proc in procs:
-            proc.terminate()
-        print("Done.")
+        print("\nShutting down...")
+        for p in procs:
+            p.terminate()
