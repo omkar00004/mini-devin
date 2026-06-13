@@ -22,5 +22,14 @@ TEMPERATURE_PLANNER = 0.1   # Temperature for PlannerAgent (extremely low for de
 TEMPERATURE_SUMMARY = 0.1   # Temperature for summarizer (extremely low for pure factual accuracy)
 
 # ── Debugger Agent Settings ──────────────────────────────────────────────────
-DEBUGGER_AGENT_PORT = 9002
+DEBUGGER_AGENT_PORT = 9002 
 MAX_DEBUG_ATTEMPTS  = 3
+
+GITHUB_MCP_PORT = 8002
+GITHUB_MCP_URL  = "http://localhost:8002"
+
+# ── Docker Sandbox ─────────────────────────────────────────────────────────
+DOCKER_IMAGE   = "mini-devin-sandbox"   # Docker image to use for the sandbox
+DOCKER_MEMORY  = "256m"               # Memory limit for the sandbox
+DOCKER_CPUS    = "0.5"                # CPU limit for the sandbox
+DOCKER_TMPFS   = "/tmp:size=50m"      # Temporary filesystem for the sandbox
